@@ -21,6 +21,14 @@
 
     <div class="top-actions">
       <button class="btn ghost" id="btnInstall" title="Instalar (PWA)" hidden>Instalar</button>
+      
+      <label class="small muted" style="display:flex;align-items:center;gap:8px">
+        <span>Setor</span>
+        <select id="cargoFilter" class="select">
+          <option value="__ALL__">Todos</option>
+        </select>
+      </label>
+
       <button class="btn" id="btnPrint">Gerar PDF (Imprimir)</button>
     </div>
   </header>
@@ -107,6 +115,11 @@
           </label>
         </div>
 
+        <label class="lbl">Cargo / Setor
+          <input id="mCargo" class="input" placeholder="Ex: OPERADOR DE CAIXA"/>
+        </label>
+
+
         <div class="box">
           <div class="h3">Folga fixa</div>
           <div class="week" id="mWeekdays"></div>
@@ -145,6 +158,31 @@
           <div class="small muted">Marque os domingos que este colaborador vai trabalhar. Eles aparecerão em <b>vermelho</b> no calendário e no PDF.</div>
           <div id="mSundayWork" class="sunday-grid" style="margin-top:10px"></div>
         </div>
+
+        <div class="box">
+          <div class="h3">Férias / Afastamento</div>
+          <div class="small muted">Defina um período de <b>Férias</b> ou <b>Afastamento</b>. Durante o período, o nome ficará tachado e aparecerá um aviso no calendário e no PDF com contagem regressiva para o retorno.</div>
+          <div class="grid2" style="margin-top:10px">
+            <label class="lbl">Tipo
+              <select id="mAbsType" class="select">
+                <option value="">— Nenhum —</option>
+                <option value="ferias">Férias</option>
+                <option value="afastamento">Afastamento</option>
+              </select>
+            </label>
+            <div></div>
+            <label class="lbl">Início
+              <input id="mAbsStart" class="input" type="date"/>
+            </label>
+            <label class="lbl">Fim
+              <input id="mAbsEnd" class="input" type="date"/>
+            </label>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:10px">
+            <button class="btn ghost danger" id="btnClearAbs" type="button">Limpar período</button>
+          </div>
+        </div>
+
       </div>
 
       <div class="modal-foot">

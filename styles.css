@@ -365,3 +365,15 @@ td.extrawork .cell{background: rgba(44,123,229,.16); border-color: rgba(44,123,2
   .calendar td.sunwork{background:rgba(239,68,68,.10) !important; border-color:rgba(120,120,120,.35) !important;}
   .calendar td.sunwork .cell{color:#000 !important; font-weight:700 !important;}
 }
+
+
+.select{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);outline:none}
+
+
+.absent-name{ text-decoration: line-through; text-decoration-thickness: 2px; opacity:.7 }
+.absence-row td{ background: rgba(255, 122, 0, .08); border-top: 0; }
+.absence-row .absence-msg{ text-align:center; font-weight:700; color: var(--accent2, #f97316); padding:6px 8px; }
+.absence-row.abs-ferias td{ background: rgba(250, 204, 21, .10); }
+.absence-row.abs-ferias .absence-msg{ color:#ea580c; }
+.absence-row.abs-afastamento td{ background: rgba(248, 113, 113, .10); }
+.absence-row.abs-afastamento .absence-msg{ color:#dc2626; }

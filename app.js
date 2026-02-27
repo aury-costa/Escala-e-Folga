@@ -8,7 +8,7 @@
   const $ = (q, el=document) => el.querySelector(q);
   const $$ = (q, el=document) => Array.from(el.querySelectorAll(q));
 
-  const STORAGE_KEY = "folgas_wap_v1";
+  const STORAGE_KEY = "folgas_wap_v1_dept_abs_v2";
   const DEFAULT_FROM_YEAR = 2026;
 
   const WEEKDAYS = [
@@ -32,6 +32,10 @@
     selectedEmployeeId: null
   };
 
+  // UI: filtro de cargo/setor
+  let selectedCargoFilter = "__ALL__";
+
+
   // month selection
   let current = new Date();
   let selectedYear = Math.max(DEFAULT_FROM_YEAR, current.getFullYear());
@@ -53,19 +57,47 @@
 
   const monthDays = (y, m) => new Date(y, m+1, 0).getDate();
 
+  const updateCargoFilterOptions = () => {
+    if(state?.cargoFilter) selectedCargoFilter = state.cargoFilter;
+    const sel = $("#cargoFilter");
+    if(!sel) return;
+    const cargos = Array.from(new Set(state.employees.map(e => (e.cargo||"").trim()).filter(Boolean)))
+      .sort((a,b)=>a.localeCompare(b));
+    const current = selectedCargoFilter || "__ALL__";
+    sel.innerHTML = `<option value="__ALL__">Todos</option>` + cargos.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+    sel.value = Array.from(sel.options).some(o => o.value === current) ? current : "__ALL__";
+    selectedCargoFilter = sel.value;
+    state.cargoFilter = selectedCargoFilter;
+  };
+
+  const isDateBetween = (dateStr, startStr, endStr) => {
+    if(!dateStr || !startStr || !endStr) return false;
+    return dateStr >= startStr && dateStr <= endStr;
+  };
+
+  const daysUntil = (fromStr, toStr) => {
+    const f = parseYMD(fromStr);
+    const t = parseYMD(toStr);
+    if(!f || !t) return null;
+    const ms = (new Date(t.getFullYear(),t.getMonth(),t.getDate())).getTime() - (new Date(f.getFullYear(),f.getMonth(),f.getDate())).getTime();
+    return Math.floor(ms / (24*3600*1000));
+  };
+
   const load = async () => {
     try{
       const raw = localStorage.getItem(STORAGE_KEY);
       if(raw){
         state = JSON.parse(raw);
         if(!state || !Array.isArray(state.employees)) throw new Error("invalid state");
+        if(!state.cargoFilter) state.cargoFilter = "__ALL__";
+        selectedCargoFilter = state.cargoFilter;
       } else {
         // First run: try to fetch embedded sample CSV (if hosted).
         await tryLoadDefaultCSV();
       }
     }catch(e){
       console.warn("load failed", e);
-      state = { employees: [], selectedEmployeeId: null };
+      state = { employees: [], selectedEmployeeId: null, cargoFilter: "__ALL__" };
     }
   };
 
@@ -120,7 +152,7 @@
       return out.map(v => v.trim().replace(/^"|"$/g,""));
     };
 
-    const headers = splitLine(lines[0]).map(h => h.trim());
+    const headers = splitLine(lines[0]).map(h => h.trim().replace(/^\uFEFF/, ""));
     const rows = lines.slice(1).map(l => splitLine(l));
     return {headers, rows};
   };
@@ -132,26 +164,40 @@
     const idxName = headers.findIndex(h => /nome/i.test(h));
     const idxMat = headers.findIndex(h => /matr/i.test(h));
     const idxId = headers.findIndex(h => /id/i.test(h));
+    const idxCargo = headers.findIndex(h => /(cargo|setor|departamento|fun[cç]ao)/i.test(h));
+    const idxAbsType = headers.findIndex(h => /(ausencia_tipo|absence_type|ferias|afastamento)/i.test(h));
+    const idxAbsStart = headers.findIndex(h => /(ausencia_inicio|absence_start|inicio_ausencia)/i.test(h));
+    const idxAbsEnd = headers.findIndex(h => /(ausencia_fim|absence_end|fim_ausencia)/i.test(h));
 
     const emps = [];
     for(const r of rows){
       const name = normalize(r[idxName >= 0 ? idxName : 1]);
       const mat = normalize(r[idxMat >= 0 ? idxMat : 0]);
       if(!name && !mat) continue;
+
+      const cargo = normalize(r[idxCargo]) || "";
+      const absType = normalize(r[idxAbsType]) || "";
+      const absStart = normalize(r[idxAbsStart]) || "";
+      const absEnd = normalize(r[idxAbsEnd]) || "";
+      const absence = (absType && absStart && absEnd) ? {type: absType.toLowerCase().includes("afast") ? "afastamento" : "ferias", start: absStart, end: absEnd} : null;
+
       emps.push({
         id: normalize(r[idxId]) || uid(),
         name: name || "SEM NOME",
         matricula: mat || "",
+        cargo,
         offWeekdays: [],      // 0..6
         extraOff: {},         // map YYYY-MM => [YYYY-MM-DD]
-        extraWork: {}         // map YYYY-MM => [YYYY-MM-DD]
+        extraWork: {},        // map YYYY-MM => [YYYY-MM-DD]
+        sundayWork: {},       // map YYYY-MM => [YYYY-MM-DD]
+        absence         // {type,start,end}
       });
     }
     return emps;
   };
 
   const exportEmployeesCSV = () => {
-    const headers = ["id","matricula","Nome","folga_fixa_semana"];
+    const headers = ["id","matricula","Nome","cargo","folga_fixa_semana","ausencia_tipo","ausencia_inicio","ausencia_fim"];
     const lines = [headers.join(";")];
 
     for(const e of state.employees){
@@ -160,7 +206,11 @@
         e.id,
         (e.matricula||"").replace(/;/g," "),
         (e.name||"").replace(/;/g," "),
-        w
+        (e.cargo||"").replace(/;/g," "),
+        w,
+        (e.absence?.type||""),
+        (e.absence?.start||""),
+        (e.absence?.end||"")
       ];
       lines.push(row.join(";"));
     }
@@ -175,6 +225,11 @@
     const key = `${dateObj.getFullYear()}-${pad2(dateObj.getMonth()+1)}`;
     const day = ymd(dateObj);
     const w = dateObj.getDay();
+
+    // ausência (férias/afastamento)
+    if(emp.absence && emp.absence.start && emp.absence.end && isDateBetween(day, emp.absence.start, emp.absence.end)){
+      return {off:false, kind:"absence"};
+    }
 
     const extraOff = (emp.extraOff?.[key] || []);
     if(extraOff.includes(day)) return {off:true, kind:"extraoff"};
@@ -239,6 +294,8 @@
       .slice()
       .sort((a,b) => (a.name||"").localeCompare(b.name||"", "pt-BR"))
       .filter(e => {
+        const c = (e.cargo||"").trim();
+        if(selectedCargoFilter !== "__ALL__" && c !== selectedCargoFilter) return false;
         if(!q) return true;
         return (e.name||"").toLowerCase().includes(q) || (e.matricula||"").toLowerCase().includes(q);
       });
@@ -291,6 +348,10 @@
 
     const emps = state.employees
       .slice()
+      .filter(e => {
+        const c = (e.cargo||"").trim();
+        return (selectedCargoFilter === "__ALL__") || (c === selectedCargoFilter);
+      })
       .sort((a,b) => (a.name||"").localeCompare(b.name||"", "pt-BR"));
 
     for(const e of emps){
@@ -308,9 +369,9 @@
       for(let d=1; d<=days; d++){
         const dt = new Date(selectedYear, selectedMonth, d);
         const info = isOff(e, dt);
-        const cls = info.kind === "sundaywork" ? "sunwork" : (info.kind === "extraoff" ? "extraoff" : (info.kind === "extrawork" ? "extrawork" : (info.off ? "off" : "")));
-        const title = info.kind === "sundaywork" ? "Domingo trabalhado" : (info.kind === "extraoff" ? "Folga alterada!" : (info.kind === "extrawork" ? "Trabalha/Não folga" : (info.off ? "Folga" : "Trabalha")));
-        const mark = info.kind === "sundaywork" ? "D" : (info.off ? "F" : "T");
+        const cls = info.kind === "absence" ? "absence" : (info.kind === "sundaywork" ? "sunwork" : (info.kind === "extraoff" ? "extraoff" : (info.kind === "extrawork" ? "extrawork" : (info.off ? "off" : ""))));
+        const title = info.kind === "absence" ? (e.absence?.type === "afastamento" ? "Afastamento" : "Férias") : (info.kind === "sundaywork" ? "Domingo trabalhado" : (info.kind === "extraoff" ? "Folga alterada!" : (info.kind === "extrawork" ? "Trabalha/Não folga" : (info.off ? "Folga" : "Trabalha"))));
+        const mark = info.kind === "absence" ? "" : (info.kind === "sundaywork" ? "D" : (info.off ? "F" : "T"));
         body.push(`<td class="${cls}" data-date="${ymd(dt)}" title="${title}">
           <div class="cell">${mark}</div>
         </td>`);
@@ -397,10 +458,12 @@
       id: uid(),
       name: "",
       matricula: "",
+      cargo: "",
       offWeekdays: [],
       extraOff: {},
       extraWork: {},
-      sundayWork: {}
+      sundayWork: {},
+      absence: null
     };
 
 
@@ -408,11 +471,17 @@
     draft.extraOff ||= {};
     draft.extraWork ||= {};
     draft.sundayWork ||= {};
+    draft.cargo ||= "";
+    if(draft.absence === undefined) draft.absence = null;
     state.selectedEmployeeId = empId || null;
 
     $("#modalTitle").textContent = emp ? "Editar colaborador" : "Adicionar colaborador";
     $("#mName").value = draft.name || "";
     $("#mMat").value = draft.matricula || "";
+    $("#mCargo") && ($("#mCargo").value = draft.cargo || "");
+    if($("#mAbsType")) $("#mAbsType").value = draft.absence?.type || "";
+    if($("#mAbsStart")) $("#mAbsStart").value = draft.absence?.start || "";
+    if($("#mAbsEnd")) $("#mAbsEnd").value = draft.absence?.end || "";
 
     // weekdays
     const wrap = $("#mWeekdays");
@@ -589,10 +658,24 @@
   const bindEvents = () => {
     $("#search").addEventListener("input", renderEmployeeList);
 
+    $("#cargoFilter")?.addEventListener("change", (ev) => {
+      selectedCargoFilter = ev.target.value || "__ALL__";
+      state.cargoFilter = selectedCargoFilter;
+      save();
+      renderAll();
+    });
+
     $("#btnAdd").addEventListener("click", () => openModal(null));
     $("#btnClose").addEventListener("click", closeModal);
     $("#btnCancel").addEventListener("click", closeModal);
     $("#btnSave").addEventListener("click", saveDraft);
+
+    $("#mCargo")?.addEventListener("input", (ev) => { if(!draft) return; draft.cargo = ev.target.value; });
+    $("#mAbsType")?.addEventListener("change", (ev) => { if(!draft) return; const v = ev.target.value; if(!v){ draft.absence=null; $("#mAbsStart").value=""; $("#mAbsEnd").value=""; return;} draft.absence ||= {type:v,start:"",end:""}; draft.absence.type=v; });
+    $("#mAbsStart")?.addEventListener("change", (ev) => { if(!draft) return; const v=ev.target.value; if(!v){ if(draft.absence) draft.absence.start=""; return;} draft.absence ||= {type:($("#mAbsType").value||"ferias"),start:"",end:""}; draft.absence.start=v; });
+    $("#mAbsEnd")?.addEventListener("change", (ev) => { if(!draft) return; const v=ev.target.value; if(!v){ if(draft.absence) draft.absence.end=""; return;} draft.absence ||= {type:($("#mAbsType").value||"ferias"),start:"",end:""}; draft.absence.end=v; });
+    $("#btnClearAbs")?.addEventListener("click", () => { if(!draft) return; draft.absence=null; if($("#mAbsType")) $("#mAbsType").value=""; if($("#mAbsStart")) $("#mAbsStart").value=""; if($("#mAbsEnd")) $("#mAbsEnd").value=""; });
+
     $("#btnDelete").addEventListener("click", deleteSelected);
 
     $("#btnAddExtraOff").addEventListener("click", () => addExtra("off"));
@@ -609,8 +692,10 @@
       for(const emp of imported){
         if(emp.matricula && byMat.has(String(emp.matricula))){
           const existing = byMat.get(String(emp.matricula));
-          // keep existing rules, update name (optional)
+          // keep existing rules, update basic info
           existing.name = emp.name || existing.name;
+          if(emp.cargo) existing.cargo = emp.cargo;
+          if(emp.absence) existing.absence = emp.absence;
         } else {
           state.employees.push(emp);
         }
@@ -629,7 +714,7 @@
     $("#btnReset").addEventListener("click", () => {
       if(!confirm("Isso vai apagar os dados salvos no navegador (não apaga seu CSV). Continuar?")) return;
       localStorage.removeItem(STORAGE_KEY);
-      state = { employees: [], selectedEmployeeId: null };
+      state = { employees: [], selectedEmployeeId: null, cargoFilter: "__ALL__" };
       renderAll();
     });
 
@@ -671,6 +756,7 @@
   };
 
   const renderAll = () => {
+    updateCargoFilterOptions();
     renderEmployeeList();
     renderCalendar();
   };
@@ -683,6 +769,15 @@
     }
 
     await load();
+    // migração leve de dados antigos
+    for(const e of (state.employees||[])){
+      e.offWeekdays ||= [];
+      e.extraOff ||= {};
+      e.extraWork ||= {};
+      e.sundayWork ||= {};
+      e.cargo ||= "";
+      if(e.absence === undefined) e.absence = null;
+    }
     fillPickers();
     bindEvents();
     renderAll();
